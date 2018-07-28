@@ -113,7 +113,7 @@ class VideoExtractor(object):
         cmd = ["mkvextract", videoFile]
 
         if self.should_save_track("chapters"):
-            cmd += ["chapters", "--simple", "{0}.chapters.txt".format(basename)]
+            cmd += ["chapters", "{0}.chapters.xml".format(basename)]
 
         if tracks:
             cmd += ["tracks"] + tracks
@@ -128,7 +128,7 @@ class VideoExtractor(object):
 
     @staticmethod
     def scan_dir(src):
-        # type: (str, AnyStr, List[str], bool) -> None
+        # type: (str) -> None
         """
         Scan directory for mkv files
 
