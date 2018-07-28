@@ -110,21 +110,24 @@ class VideoExtractor(object):
                   for track in self.mkv_tracks(videoFile)
                   if self.should_save_track(track["type"])]
 
-        cmd = ["mkvextract", videoFile]
-
+        cmd = []
         if self.should_save_track("chapters"):
             cmd += ["chapters", "{0}.chapters.xml".format(basename)]
 
         if tracks:
             cmd += ["tracks"] + tracks
+
+        if cmd:
+            cmd = ["mkvextract", videoFile] + cmd
+
+            if self.dry_run:
+                print " \\\n\t".join(cmd)
+            else:
+                for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=1, close_fds=True).stdout:
+                    print line,
         else:
             print("{file}: no {types} tracks found.".format(file=videoFile, types="/".join(self.track_types)))
 
-        if self.dry_run:
-            print " \\\n\t".join(cmd)
-        else:
-            for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=1, close_fds=True).stdout:
-                print line,
 
     @staticmethod
     def scan_dir(src):
