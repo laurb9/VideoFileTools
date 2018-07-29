@@ -2,12 +2,15 @@
 """
 Tool to extract all subtitle or audio tracks from a video into separate files.
 
-Requires: mkvtoolnix (Mac OS: brew install mkvtoolnix)
+Requires:
+- mkvtoolnix (Mac OS: brew install mkvtoolnix)
+- mediainfo (Mac OS: brew install mediainfo, or install from https://mediaarea.net/en/MediaInfo)
 """
 import argparse
 import itertools
+import json
 import os
-import re
+
 try:
     import subprocess32 as subprocess
 except ImportError:
@@ -18,22 +21,18 @@ except ImportError:
     pass
 
 class VideoExtractor(object):
-    # Sample formats:
-    # Track 3: subtitles, codec ID: S_VOBSUB, mkvmerge/mkvextract track ID: 2, language: spa
-    # Track 4: subtitles, codec ID: S_TEXT/ASS, mkvmerge/mkvextract track ID: 3
-    MKVINFO_TRACK_FORMAT = re.compile(r"Track \d+: (?P<type>\w+), "
-                                      r"codec ID: \w_(?P<codec>\S+).*?, \S+ "
-                                      r"track ID: (?P<id>\d+)(, language: (?P<lang>\w+))?")
 
     CODEC_TO_EXT = {
         "AAC": "m4a",
         "AC3": "ac3",
-        "MP3": "mp3",
-        "VOBSUB": "sub",
-        "TEXT": "srt",
-        "HDMV": "sup",
-        "MPEG4": "mp4",
-        "MPEGH": "mp4",
+        "AC-3": "ac3",
+        "A_MPEG/L3": "mp3",
+        "S_VOBSUB": "sub",
+        "PGS": "sup",
+        "S_TEXT/ASS": "sup",
+        "S_TEXT": "srt",
+        "AVC": "h264",
+        "HEVC": "h265",
     }  # type: Dict[str, str]
 
     def __init__(self, track_types, dry_run=False):
@@ -53,41 +52,61 @@ class VideoExtractor(object):
 
 
     @classmethod
-    def codec_to_ext(cls, codec):
+    def format_to_ext(cls, codec, format):
         # type: (str) -> str
         """
         Map a codec name to a file extension to save it to.
 
-        :param codec: codec name
+        :param format: codec name
         :return: file extension
         """
-        codec = codec.split("/")[0]
-        return cls.CODEC_TO_EXT[codec]
+        for key in (format, codec, codec.split("/")[0]):
+            if key in cls.CODEC_TO_EXT:
+                return cls.CODEC_TO_EXT[key]
+        print(u'Unknown track code="{0}" format="{1}"'.format(codec, format))
+        return format
 
 
     @classmethod
-    def mkv_tracks(cls, videoFile):
+    def mediainfo(cls, videoFile):
         # type: (str) -> Generator[Dict]
         """
-        Read the available tracks from mkv file.
+        Read the available tracks from video file.
 
-        :param videoFile: source mkv file
-        :return: track available as dictionaries {id, ext, lang, codec}
+        :param videoFile: source video file
+        :return: track available as dictionaries {ID, Language, Forced, Extension}
         """
-        mkvinfo = subprocess.Popen(["mkvinfo", "--summary", videoFile], stdout=subprocess.PIPE, close_fds=True)
-        for line in mkvinfo.stdout:
-            if not line.startswith("Track"):
-                continue
-
-            match = cls.MKVINFO_TRACK_FORMAT.search(line)
-            if match:
-                track = match.groupdict()
-                track["ext"] = VideoExtractor.codec_to_ext(track["codec"])
-                track["lang"] = track["lang"] or "eng"
+        mediainfo_cmd = ["mediainfo", "--output=JSON", videoFile]
+        mediainfo = json.load(subprocess.Popen(mediainfo_cmd, stdout=subprocess.PIPE, universal_newlines=True).stdout)
+        for track in mediainfo["media"]["track"]:
+            if "ID" in track and track["@type"] != "Menu":
+                print track
+                track["Extension"] = VideoExtractor.format_to_ext(track["CodecID"], track["Format"])
+                track["Language"] = track.get("Language") or "en"
+                track["id"] = int(track["ID"]) - 1
+                if "@typeorder" in track:
+                    track["ID"] = track["@typeorder"]
+                elif "StreamOrder" in track:
+                    track["ID"] = track["StreamOrder"]
+                if track.get("Forced") == "Yes":
+                    track["Language"] += "-forced"
+                if "Title" not in track:
+                    track["Title"] = ""
                 yield track
-            else:
-                print("%s: Do not recognize: %s" % (videoFile, line))
 
+    def get_track_name(self, track):
+        # type: (dict) -> unicode
+        """
+        Create an appropriate name-extension for this track
+        :param track: mediainfo track dictionary
+        :return: id-prefixed track name
+        """
+        if track["Title"]:
+            format = u"{ID}.{Title}.{Language}.{Extension}"
+        else:
+            format = u"{ID}.{Language}.{Extension}"
+
+        return format.format(**track)
 
     def split_mkv(self, videoFile, dst):
         # type: (str, AnyStr) -> None
@@ -106,13 +125,13 @@ class VideoExtractor(object):
             else:
                 basename = dst
 
-        tracks = ["{id}:{name}.{id}.{lang}.{ext}".format(name=basename, **track)
-                  for track in self.mkv_tracks(videoFile)
-                  if self.should_save_track(track["type"])]
+        tracks = [u"{id}:{name}.{track}".format(name=basename, track=self.get_track_name(track), **track)
+                  for track in self.mediainfo(videoFile)
+                  if self.should_save_track(track["@type"])]
 
         cmd = []
         if self.should_save_track("chapters"):
-            cmd += ["chapters", "{0}.chapters.xml".format(basename)]
+            cmd += ["chapters", u"{0}.chapters.xml".format(basename)]
 
         if tracks:
             cmd += ["tracks"] + tracks
@@ -121,12 +140,12 @@ class VideoExtractor(object):
             cmd = ["mkvextract", videoFile] + cmd
 
             if self.dry_run:
-                print " \\\n\t".join(cmd)
+                print u" \\\n\t".join(cmd)
             else:
-                for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=1, close_fds=True).stdout:
+                for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True).stdout:
                     print line,
         else:
-            print("{file}: no {types} tracks found.".format(file=videoFile, types="/".join(self.track_types)))
+            print(u"{file}: no {types} tracks found.".format(file=videoFile, types="/".join(self.track_types)))
 
 
     @staticmethod
@@ -156,11 +175,11 @@ def main():
     parser.add_argument("-n", "--dry-run", required=False, default=False, action="store_true",
                         help="do not write any files")
     group = parser.add_argument_group("Extracted tracks types")
-    group.add_argument("--video", dest='track_types', action='append_const', const="video",
+    group.add_argument("--video", dest='track_types', action='append_const', const="Video",
                        help="extract video tracks")
-    group.add_argument("--audio", dest='track_types', action='append_const', const="audio",
+    group.add_argument("--audio", dest='track_types', action='append_const', const="Audio",
                        help="extract audio tracks")
-    group.add_argument("--subtitles", dest='track_types', action='append_const', const="subtitles",
+    group.add_argument("--subtitles", dest='track_types', action='append_const', const="Text",
                        help="extract subtitles tracks")
     group.add_argument("--chapters", dest='track_types', action='append_const', const="chapters",
                        help="extract chapters")
