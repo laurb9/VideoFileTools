@@ -192,6 +192,8 @@ class VideoExtractor(object):
         """
 
         def save_cmd_output_to_file(cmd, filename):
+            if self.dry_run:
+                return print(u" \\\n\t".join(cmd), ">", filename)
             output = subprocess.Popen(cmd, stdout=subprocess.PIPE).stdout
             with open(filename, "w") as f:
                 filter(f.write, output.readlines())
@@ -213,6 +215,10 @@ class VideoExtractor(object):
 
             else:
                 cmd += ["-raw", "{0}:output={1}".format(track_id, track_filename)]
+                if self.dry_run:
+                    print(u" \\\n\t".join(cmd))
+                    continue
+
                 for line in subprocess.Popen(cmd, stdout=subprocess.PIPE).stdout:
                     print(line, end="")
 
