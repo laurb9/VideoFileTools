@@ -42,7 +42,7 @@ class VideoExtractor(object):
 
 
     def should_save_track(self, track_type):
-        # type: (str) -> bool
+        # type: (unicode) -> bool
         """
         Return True if the track should be saved
         :param track_type:
@@ -80,7 +80,7 @@ class VideoExtractor(object):
         mediainfo = json.load(subprocess.Popen(mediainfo_cmd, stdout=subprocess.PIPE, universal_newlines=True).stdout)
         for track in mediainfo["media"]["track"]:
             if "ID" in track and track["@type"] != "Menu":
-                print track
+                #print track
                 track["Extension"] = VideoExtractor.format_to_ext(track["CodecID"], track["Format"])
                 track["Language"] = track.get("Language") or "en"
                 track["id"] = int(track["ID"]) - 1
@@ -125,6 +125,8 @@ class VideoExtractor(object):
             else:
                 basename = dst
 
+        basename = basename.decode("utf8")
+        videoFile = videoFile.decode("utf8")
         tracks = [u"{id}:{name}.{track}".format(name=basename, track=self.get_track_name(track), **track)
                   for track in self.mediainfo(videoFile)
                   if self.should_save_track(track["@type"])]
@@ -142,7 +144,7 @@ class VideoExtractor(object):
             if self.dry_run:
                 print u" \\\n\t".join(cmd)
             else:
-                for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True).stdout:
+                for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout:
                     print line,
         else:
             print(u"{file}: no {types} tracks found.".format(file=videoFile, types="/".join(self.track_types)))
