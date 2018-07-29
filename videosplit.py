@@ -191,6 +191,17 @@ class VideoExtractor(object):
         :param tracks: list of selected tracks to extract
         """
 
+        def save_cmd_output_to_file(cmd, filename):
+            output = subprocess.Popen(cmd, stdout=subprocess.PIPE).stdout
+            with open(filename, "w") as f:
+                filter(f.write, output.readlines())
+            if not os.path.getsize(filename):
+                print(u"Empty {0} from cmd: '{1}'".format(filename, "' '".join(cmd)))
+
+        if self.should_save_track("chapters"):
+            cmd = ["MP4Box", videoFile, "-std", "-dump-chap"]
+            save_cmd_output_to_file(cmd, u"{0}.chapters.xml".format(target_name))
+
         for track in tracks:
             track_filename = u"{name}.{track}".format(name=target_name, track=self.get_track_name(track))
             track_id = str(track["id"]+1)
@@ -198,14 +209,10 @@ class VideoExtractor(object):
             cmd = ["MP4Box", videoFile]
             if track["Extension"] == "srt":
                 cmd += ["-std", "-srt", track_id]
-                mp4box = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-                with open(track_filename, "w") as out:
-                    filter(out.write, mp4box.stdout.readlines())
+                save_cmd_output_to_file(cmd, track_filename)
 
             else:
-                #if track["Extension"] == "sub":
-                #    track_filename = track_filename.replace(".sub", ".idx")
-                cmd = ["MP4Box", videoFile, "-raw", "{0}:output={1}".format(track_id, track_filename)]
+                cmd += ["-raw", "{0}:output={1}".format(track_id, track_filename)]
                 for line in subprocess.Popen(cmd, stdout=subprocess.PIPE).stdout:
                     print(line, end="")
 
